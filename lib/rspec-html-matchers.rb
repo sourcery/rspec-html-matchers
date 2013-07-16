@@ -5,7 +5,6 @@ require 'rspec/expectations'
 module RSpec
   module Html
     module Matchers
-      extend RSpec::Matchers::DSL
 
       # @api
       # @private
@@ -47,10 +46,7 @@ module RSpec
 
       # @api
       # @private
-      class NokogiriMatcher
-        attr_reader :failure_message, :negative_failure_message
-        attr_reader :parent_scope, :current_scope
-
+      class HaveTag
         TAG_FOUND_DESC           = %Q|have at least 1 element matching "%s"|
         TAG_NOT_FOUND_MSG        = %Q|expected following:\n%s\nto #{TAG_FOUND_DESC}, found 0.|
         TAG_FOUND_MSG            = %Q|expected following:\n%s\nto NOT have element matching "%s", found %s.|
@@ -71,10 +67,12 @@ module RSpec
         MIN_MAX_ERROR_MSG        = %Q|:minimum shold be less than :maximum!|
         BAD_RANGE_ERROR_MSG      = %Q|Your :count range(%s) has no sence!|
 
-        def initialize tag, options={}, &block
-          @tag, @options, @block = tag.to_s, (options||{}), block
+        attr_reader :tag
 
-          # for backwards compatibility with rpecs have tag:
+        def initialize tag, options={}, &block
+          @tag, @options, @block = tag.to_s, options, block
+
+          # for backwards compatibility with rspec's have tag:
           @options = { :text => @options } if @options.kind_of? String
 
           if with_attrs = @options.delete(:with)
@@ -97,28 +95,35 @@ module RSpec
           validate_options!
         end
 
-        def matches? document, &block
-          @block = block if block
+        def matches? actual_document, &block
+          @block = block
 
-          document = document.html if defined?(Capybara) && document.is_a?(Capybara::Session)
+          actual_document = actual_document.html if defined?(Capybara) && actual_document.is_a?(Capybara::Session)
 
-          case document
-          when String
-            @parent_scope = @current_scope = Nokogiri::HTML(document).css(@tag)
-            @document     = document
-          else
-            @parent_scope  = document.current_scope
-            @current_scope = document.parent_scope.css(@tag)
-            @document      = @parent_scope.to_html
-          end
+          @actual_document = actual_document
 
           if tag_presents? and text_right? and count_right?
-            @current_scope = @parent_scope
             @block.call if @block
             true
           else
             false
           end
+        end
+
+        def current_document
+          nokogiri_document.to_html
+        end
+
+        def document_to_show
+          @actual_document
+        end
+
+        def failure_message_for_should
+          @failure_message
+        end
+
+        def failure_message_for_should_not
+          @negative_failure_message
         end
 
         def description
@@ -141,13 +146,17 @@ module RSpec
           end
         end
 
+        def nokogiri_document
+          @__nokogiri_document ||= Nokogiri::HTML(@actual_document).css(@tag)
+        end
+
         def tag_presents?
-          if @current_scope.first
-            @count = @current_scope.count
-            @negative_failure_message = TAG_FOUND_MSG % [@document, @tag, @count]
+          if nokogiri_document.first
+            @count = nokogiri_document.count
+            @negative_failure_message = TAG_FOUND_MSG % [document_to_show, @tag, @count]
             true
           else
-            @failure_message          = TAG_NOT_FOUND_MSG % [@document, @tag]
+            @failure_message          = TAG_NOT_FOUND_MSG % [document_to_show, @tag]
             false
           end
         end
@@ -155,14 +164,14 @@ module RSpec
         def count_right?
           case @options[:count]
           when Integer
-            ((@negative_failure_message=RIGHT_COUNT_MSG % [@document,@count,@tag]) && @count == @options[:count]) || (@failure_message=WRONG_COUNT_MSG % [@document,@options[:count],@tag,@count]; false)
+            ((@negative_failure_message=RIGHT_COUNT_MSG % [document_to_show,@count,@tag]) && @count == @options[:count]) || (@failure_message=WRONG_COUNT_MSG % [document_to_show,@options[:count],@tag,@count]; false)
           when Range
-            ((@negative_failure_message=RIGHT_BETWEEN_COUNT_MSG % [@document,@options[:count].min,@options[:count].max,@tag,@count]) && @options[:count].member?(@count)) || (@failure_message=BETWEEN_COUNT_MSG % [@document,@options[:count].min,@options[:count].max,@tag,@count]; false)
+            ((@negative_failure_message=RIGHT_BETWEEN_COUNT_MSG % [document_to_show,@options[:count].min,@options[:count].max,@tag,@count]) && @options[:count].member?(@count)) || (@failure_message=BETWEEN_COUNT_MSG % [document_to_show,@options[:count].min,@options[:count].max,@tag,@count]; false)
           when nil
             if @options[:maximum]
-              ((@negative_failure_message=RIGHT_AT_MOST_MSG % [@document,@options[:maximum],@tag,@count]) && @count <= @options[:maximum]) || (@failure_message=AT_MOST_MSG % [@document,@options[:maximum],@tag,@count]; false)
+              ((@negative_failure_message=RIGHT_AT_MOST_MSG % [document_to_show,@options[:maximum],@tag,@count]) && @count <= @options[:maximum]) || (@failure_message=AT_MOST_MSG % [document_to_show,@options[:maximum],@tag,@count]; false)
             elsif @options[:minimum]
-              ((@negative_failure_message=RIGHT_AT_LEAST_MSG % [@document,@options[:minimum],@tag,@count]) && @count >= @options[:minimum]) || (@failure_message=AT_LEAST_MSG % [@document,@options[:minimum],@tag,@count]; false)
+              ((@negative_failure_message=RIGHT_AT_LEAST_MSG % [document_to_show,@options[:minimum],@tag,@count]) && @count >= @options[:minimum]) || (@failure_message=AT_LEAST_MSG % [document_to_show,@options[:minimum],@tag,@count]; false)
             else
               true
             end
@@ -174,23 +183,23 @@ module RSpec
 
           case text=@options[:text]
           when Regexp
-            new_scope = @current_scope.css(':regexp()',NokogiriRegexpHelper.new(text))
+            new_scope = nokogiri_document.css(':regexp()',NokogiriRegexpHelper.new(text))
             unless new_scope.empty?
               @count = new_scope.count
-              @negative_failure_message = REGEXP_FOUND_MSG % [text.inspect,@tag,@document]
+              @negative_failure_message = REGEXP_FOUND_MSG % [text.inspect,@tag,document_to_show]
               true
             else
-              @failure_message          = REGEXP_NOT_FOUND_MSG % [text.inspect,@tag,@document]
+              @failure_message          = REGEXP_NOT_FOUND_MSG % [text.inspect,@tag,document_to_show]
               false
             end
           else
-            new_scope = @current_scope.css(':content()',NokogiriTextHelper.new(text))
+            new_scope = nokogiri_document.css(':content()',NokogiriTextHelper.new(text))
             unless new_scope.empty?
               @count = new_scope.count
-              @negative_failure_message = TEXT_FOUND_MSG % [text,@tag,@document]
+              @negative_failure_message = TEXT_FOUND_MSG % [text,@tag,document_to_show]
               true
             else
-              @failure_message          = TEXT_NOT_FOUND_MSG % [text,@tag,@document]
+              @failure_message          = TEXT_NOT_FOUND_MSG % [text,@tag,document_to_show]
               false
             end
           end
@@ -263,38 +272,20 @@ module RSpec
       #    </html>".should have_tag('body') { with_tag('h1', :text => 'some html document') }
       #   '<div class="one two">'.should have_tag('div', :with => { :class => ['two', 'one'] })
       #   '<div class="one two">'.should have_tag('div', :with => { :class => 'two one' })
-      matcher :have_tag do |tag,options,&block|
-
-        define_method :nokogiri_matcher do
-          @__nokogiri_matcher ||= NokogiriMatcher.new(tag,options,&block)
-        end
-
-        match {|html_content| nokogiri_matcher.matches?(html_content) }
-
-        description { nokogiri_matcher.description }
-
-        failure_message_for_should do |actual|
-          nokogiri_matcher.failure_message
-        end
-
-        failure_message_for_should_not do |actual|
-          nokogiri_matcher.negative_failure_message
-        end
-
+      def have_tag tag,options={},&block
+        @__current_match = HaveTag.new tag, options, &block
       end
 
       def with_text text
-        raise StandardError, 'this matcher should be used inside "have_tag" matcher block' unless defined?(@__current_scope_for_nokogiri_matcher)
+        raise StandardError, 'this matcher should be used inside "have_tag" matcher block' unless defined?(@__current_match)
         raise ArgumentError, 'this matcher does not accept block' if block_given?
-        tag = @__current_scope_for_nokogiri_matcher.instance_variable_get(:@tag)
-        @__current_scope_for_nokogiri_matcher.should have_tag(tag, :text => text)
+        expect(@__current_match.current_document).to have_tag(@__current_match.tag, :text => text)
       end
 
       def without_text text
-        raise StandardError, 'this matcher should be used inside "have_tag" matcher block' unless defined?(@__current_scope_for_nokogiri_matcher)
+        raise StandardError, 'this matcher should be used inside "have_tag" matcher block' unless defined?(@__current_match)
         raise ArgumentError, 'this matcher does not accept block' if block_given?
-        tag = @__current_scope_for_nokogiri_matcher.instance_variable_get(:@tag)
-        @__current_scope_for_nokogiri_matcher.should_not have_tag(tag, :text => text)
+        expect(@__current_match.current_document).to_not have_tag(@__current_match.tag, :text => text)
       end
       alias :but_without_text :without_text
 
@@ -303,7 +294,7 @@ module RSpec
       # @see #have_tag
       # @note this should be used within block of have_tag matcher
       def with_tag tag, options={}, &block
-        @__current_scope_for_nokogiri_matcher.should have_tag(tag, options, &block)
+        expect(@__current_match.current_document).to (have_tag(tag, options))
       end
 
       # without_tag matcher
@@ -311,7 +302,7 @@ module RSpec
       # @see #have_tag
       # @note this should be used within block of have_tag matcher
       def without_tag tag, options={}, &block
-        @__current_scope_for_nokogiri_matcher.should_not have_tag(tag, options, &block)
+        expect(@__current_match.current_document).to_not have_tag(tag, options)
       end
 
       # form assertion
