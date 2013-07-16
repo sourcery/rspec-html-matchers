@@ -13,6 +13,15 @@ Gem::Specification.new do |s|
   s.description = <<DESC
 #{s.summary}. Does not depend on assert_select matcher, provides useful error messages.
 DESC
+  s.post_install_message = <<POST
+new setup for rspec-html-matchers:
+
+  require 'rspec-html-matchers'
+
+  RSpec.configure do |config|
+    config.include RSpec::Html::Matchers
+  end
+POST
 
   s.rubyforge_project = 'rspec-html-matchers'
 

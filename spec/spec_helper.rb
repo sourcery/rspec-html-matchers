@@ -36,4 +36,5 @@ end
 RSpec.configure do |config|
   config.extend  AssetHelpers
   config.include CustomHelpers
+  config.include RSpec::Html::Matchers
 end

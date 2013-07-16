@@ -28,6 +28,25 @@ Add to your Gemfile in the `:test` group:
 gem 'rspec-html-matchers'
 ```
 
+and somewhere:
+
+```ruby
+RSpec.configure do |config|
+  config.include RSpec::Html::Matchers
+end
+```
+
+or just in you spec(s):
+
+```ruby
+describe "my view spec" do
+  include RSpec::Html::Matchers
+  it "has tags" do
+    rendered.should have_tag('div')
+  end
+end
+```
+
 as this gem requires **nokogiri**, here [instructions for installing it](http://nokogiri.org/tutorials/installing_nokogiri.html).
 
 Usage
