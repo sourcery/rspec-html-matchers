@@ -70,7 +70,8 @@ module RSpec
         attr_reader :tag
 
         def initialize tag, options={}, &block
-          @tag, @options, @block = tag.to_s, options, block
+          @tag, @options = tag.to_s, options
+          @block = block
 
           # for backwards compatibility with rspec's have tag:
           @options = { :text => @options } if @options.kind_of? String
@@ -96,14 +97,12 @@ module RSpec
         end
 
         def matches? actual_document, &block
-          @block = block
-
           actual_document = actual_document.html if defined?(Capybara) && actual_document.is_a?(Capybara::Session)
+          @block ||= block
 
           @actual_document = actual_document
 
-          if tag_presents? and text_right? and count_right?
-            @block.call if @block
+          if tag_presents? and text_right? and count_right? and inside_block_ok?
             true
           else
             false
@@ -111,7 +110,7 @@ module RSpec
         end
 
         def current_document
-          nokogiri_document.to_html
+          nokogiri_document
         end
 
         def document_to_show
@@ -135,7 +134,71 @@ module RSpec
           end
         end
 
+        # with_tag matcher
+        # @yield block where you should put other with_tag or without_tag
+        # @see #have_tag
+        # @note this should be used within block of have_tag matcher
+        def with_tag tag, options={}, &block
+          m=self.class.new(tag, options, &block)
+          if m.matches?(current_document)
+            @negative_failure_message=m.failure_message_for_should_not
+            true
+          else
+            @failure_message=m.failure_message_for_should
+            false
+          end
+        end
+
+        # without_tag matcher
+        # @yield block where you should put other with_tag or without_tag
+        # @see #have_tag
+        # @note this should be used within block of have_tag matcher
+        def without_tag tag, options={}, &block
+          m=self.class.new(tag, options, &block)
+          if not m.matches?(current_document)
+            @negative_failure_message=m.failure_message_for_should_not
+            true
+          else
+            @failure_message=m.failure_message_for_should
+            false
+          end
+        end
+
+        def with_text text
+          #raise StandardError, 'this matcher should be used inside "have_tag" matcher block' if @current_document.nil?
+          raise ArgumentError, 'this matcher does not accept block' if block_given?
+          m=self.class.new(@tag, :text => text)
+          if m.matches?(current_document)
+            @negative_failure_message=m.failure_message_for_should_not
+            true
+          else
+            @failure_message=m.failure_message_for_should
+            false
+          end
+        end
+
+        def without_text text
+          raise ArgumentError, 'this matcher does not accept block' if block_given?
+          m=self.class.new(@tag, :text => text)
+          if not m.matches?(current_document)
+            @negative_failure_message=m.failure_message_for_should_not
+            true
+          else
+            @failure_message=m.failure_message_for_should
+            false
+          end
+        end
+        alias :but_without_text :without_text
+
         private
+
+        def inside_block_ok?
+          if @block
+            instance_exec &@block
+          else
+            true
+          end
+        end
 
         def classes_to_selector(classes)
           case classes
@@ -147,7 +210,11 @@ module RSpec
         end
 
         def nokogiri_document
-          @__nokogiri_document ||= Nokogiri::HTML(@actual_document).css(@tag)
+          @__nokogiri_document ||= if @actual_document.is_a?(Nokogiri::XML::NodeSet)
+                                     @actual_document.css(@tag)
+                                   else
+                                     Nokogiri::HTML(@actual_document).css(@tag)
+                                   end
         end
 
         def tag_presents?
@@ -272,38 +339,10 @@ module RSpec
       #    </html>".should have_tag('body') { with_tag('h1', :text => 'some html document') }
       #   '<div class="one two">'.should have_tag('div', :with => { :class => ['two', 'one'] })
       #   '<div class="one two">'.should have_tag('div', :with => { :class => 'two one' })
-      def have_tag tag,options={},&block
-        @__current_match = HaveTag.new tag, options, &block
+      def have_tag tag, options={}, &block
+        HaveTag.new(tag, options, &block)
       end
 
-      def with_text text
-        raise StandardError, 'this matcher should be used inside "have_tag" matcher block' unless defined?(@__current_match)
-        raise ArgumentError, 'this matcher does not accept block' if block_given?
-        expect(@__current_match.current_document).to have_tag(@__current_match.tag, :text => text)
-      end
-
-      def without_text text
-        raise StandardError, 'this matcher should be used inside "have_tag" matcher block' unless defined?(@__current_match)
-        raise ArgumentError, 'this matcher does not accept block' if block_given?
-        expect(@__current_match.current_document).to_not have_tag(@__current_match.tag, :text => text)
-      end
-      alias :but_without_text :without_text
-
-      # with_tag matcher
-      # @yield block where you should put other with_tag or without_tag
-      # @see #have_tag
-      # @note this should be used within block of have_tag matcher
-      def with_tag tag, options={}, &block
-        expect(@__current_match.current_document).to (have_tag(tag, options))
-      end
-
-      # without_tag matcher
-      # @yield block where you should put other with_tag or without_tag
-      # @see #have_tag
-      # @note this should be used within block of have_tag matcher
-      def without_tag tag, options={}, &block
-        expect(@__current_match.current_document).to_not have_tag(tag, options)
-      end
 
       # form assertion
       #
